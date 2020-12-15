@@ -96,6 +96,169 @@ public class Random implements java.io.Serializable {
     static final String BadRange = "bound must be greater than origin";
     static final String BadSize  = "size must be non-negative";
 
+    private static class MCMappings {
+
+        // official -> named classes
+        Map<String, String> class_map = new HashMap<>();
+        // official -> named methods
+        // class_id.method_id -> { named_method }
+        Map<String, Set<String>> class_func_map = new HashMap<>();
+
+        boolean is_loaded = false;
+
+        public MCMappings() {
+
+            try {
+
+                // official -> intermediary -> named
+                // abc -> net/minecraft/class_4585 -> net/minecraft/util/math/Matrix3f
+
+                String home_dir = System.getProperty("user.home");
+
+                // intermediary to named map
+                var srg_snap = new File(home_dir + "/.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config/1.16.4-20201102.104115/srg_to_snapshot_20201028-1.16.3.tsrg");
+
+                // official to intermediary map
+                var obf_srg = new File(home_dir + "/.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config/1.16.4-20201102.104115/obf_to_srg.tsrg");
+               
+
+                System.out.println("loading mappings...");
+
+
+                // get intermediary to named map first
+
+                Map<String, String> func_map = new HashMap<>();
+
+                var scan = new Scanner(srg_snap);
+
+                while (scan.hasNextLine()) {
+                    String line[] = scan.nextLine().split("\\s");
+                    // line is a method map
+                    if (line.length == 4) {
+                        func_map.put(line[1], line[3]);
+                    }
+                }
+
+                scan.close();
+
+                // get official to intermediary 
+
+                scan = new Scanner(obf_srg);
+
+                String current_class_id = "";
+                String current_class_name = "";
+                String current_func_id = "";
+                Set<String> current_func_set = new HashSet<>();
+
+                while (scan.hasNextLine()) {
+                    String line[] = scan.nextLine().split("\\s");
+
+                    // line is a class name map
+                    if (line.length == 2) {
+
+                        // push current func set
+                        class_func_map.put(current_class_id + "." + current_func_id, current_func_set);
+                        current_func_set = new HashSet<>();
+                        current_func_id = "";
+
+                        current_class_id = line[0].replace("/", ".");
+                        current_class_name = line[1].replace("/", ".");
+                        class_map.put(current_class_id, current_class_name);
+                    }
+
+                    // class method map
+                    else if (line.length == 4) {
+
+                        if (!line[1].equals(current_func_id)) {
+                            if (!current_func_set.isEmpty()) {
+                                class_func_map.put(current_class_id + "." + current_func_id, current_func_set);
+                                current_func_set = new HashSet<>();
+                            }
+                            current_func_id = line[1];
+                        }
+                  
+                        // add to current set
+                        // get named if it exists or fall back on intermediary name
+                        current_func_set.add(func_map.getOrDefault(line[3], line[3]));
+                    }
+                }
+
+                if (!current_func_set.isEmpty()) {
+                    class_func_map.put(current_class_id + "." + current_func_id, current_func_set);
+                    current_func_set = new HashSet<>();
+                } 
+
+                scan.close();
+                
+
+                is_loaded = true;
+
+                scan.close();
+                
+            } catch (Exception e) {
+                System.out.println("failed to load mappings files");
+            }
+
+        }
+
+        public String deobfuscate(StackTraceElement trace) {
+
+            // todo find a way to get the bytecode method signature to narrow down results
+
+
+            // todo return a new StackTraceElement
+
+            String class_name = trace.getClassName();
+
+            if (class_name.startsWith("java"))
+                return trace.toString();
+
+            String named_class = class_map.getOrDefault(class_name, class_name);
+
+            String output = class_name + "." + trace.getMethodName() + "  ->  " + named_class + ".";
+
+            Set<String> set = class_func_map.get(class_name + "." + trace.getMethodName());
+
+            if (set == null) 
+                return output + "{?}";
+
+            if (set.size() == 1) {
+                return output + set.iterator().next();
+            }
+
+            output += "{";
+
+            Iterator<String> iter = set.iterator();
+
+            String output_front = "";
+            String output_back = "";
+
+            while (iter.hasNext()) {
+                String s = iter.next();
+                if (s.startsWith("func_")) {
+                    if (output_back.length() > 0)
+                        output_back += ", ";
+                    output_back += s;
+                } else {
+                    if (output_front.length() > 0)
+                        output_front += ", ";
+                    output_front += s;
+                }
+            }
+
+            output += output_front;
+            if (output_front.length() > 0 && output_back.length() > 0) {
+                output += ", ";
+            }
+            return output + output_back + "}";
+        }
+        
+    }
+
+
+    private static MCMappings mappings;
+
+
     /**
      * Creates a new random number generator. This constructor sets
      * the seed of the random number generator to a value very likely
@@ -140,6 +303,12 @@ public class Random implements java.io.Serializable {
             this.seed = new AtomicLong();
             setSeed(seed);
         }
+
+        if (mappings == null) {
+            mappings = new MCMappings();
+        }
+
+        // todo use stack trace deobfuscation to flag this instance
     }
 
     private static long initialScramble(long seed) {
@@ -386,6 +555,29 @@ public class Random implements java.io.Serializable {
     public int nextInt(int bound) {
         if (bound <= 0)
             throw new IllegalArgumentException(BadBound);
+
+        // if bound == total weight of piglin bartering loot pool
+        if (bound == 459) {
+
+            // get the stack trace that called nextInt()
+            // the third element is the caller
+            StackTraceElement stackTraceElements[] = Thread.currentThread().getStackTrace();
+
+            // ignore if shuffle is the caller
+            if (!stackTraceElements[2].getMethodName().equals("shuffle")) {
+
+                System.out.println("are ya winning, son?");
+                System.out.println("the seed is: " + this.seed);
+
+                for (StackTraceElement stackTraceElement : stackTraceElements) {
+                    // print deobfuscated stack trace
+                    System.out.println(mappings.deobfuscate(stackTraceElement));
+                }
+
+                // first one on the loot table
+                return 0;
+            }
+        }
 
         int r = next(31);
         int m = bound - 1;
