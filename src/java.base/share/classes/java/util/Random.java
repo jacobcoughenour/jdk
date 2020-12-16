@@ -100,20 +100,177 @@ public class Random implements java.io.Serializable {
 
         // official -> named classes
         Map<String, String> class_map = new HashMap<>();
+        // named classes -> official
+        // Map<String, String> class_map_inv = new HashMap<>();
+
         // official -> named methods
         // class_id.method_id -> { named_method }
         Map<String, Set<String>> class_func_map = new HashMap<>();
+        // named_method -> class_id.method_id
+        // Map<String, String> class_func_map_inv = new HashMap<>();
 
         boolean is_loaded = false;
+
+        List<HookMapping> hooks = new ArrayList<HookMapping>();
+        Map<Integer, List<HookMapping>> hook_map = new HashMap<>();
+        int min_weight_total = Integer.MAX_VALUE;
+        int max_weight_total = 0;
+
+        class HookMapping {
+            int trace_index;
+            String class_id;
+            String method_id;
+
+            int vanilla_weights[];
+            int vanilla_weights_total;
+
+            int mod_weights[];
+            int mod_weights_total;
+
+            @Override
+            public String toString() {
+                String output = "HookMapping { [" + trace_index + "] " + class_id + "." + method_id;
+
+                output += "\n\tvanilla_weights_total = " + vanilla_weights_total;
+                output += "\n\tmod_weights_total = " + mod_weights_total;
+                output += "\n\tmapping = {";
+
+                for (int i = 0; i < Math.min(vanilla_weights.length, mod_weights.length); i++) {
+                    output += "\n\t\t" + vanilla_weights[i] + " -> " + mod_weights[i];
+                }
+
+                return output + "\n\t}\n}";
+            }
+        }
+
 
         public MCMappings() {
 
             try {
 
+                String home_dir = System.getProperty("user.home");
+
+                var hook_file = new File(home_dir + "/hooks.txt");
+
+                var scan = new Scanner(hook_file);
+
+                int cur_trace_index = 0;
+                String cur_class_id = "";
+                String cur_method_id = "";
+
+                List<Integer> cur_vanilla_weights = new ArrayList<Integer>();
+                int cur_vanilla_total = 0;
+                List<Integer> cur_mod_weights = new ArrayList<Integer>();
+                int cur_mod_total = 0;
+
+                while (scan.hasNextLine()) {
+                    String line = scan.nextLine();
+
+                    // skip comments
+                    if (line.trim().startsWith("#")) {
+                        continue;
+                    }
+
+                    // skip empty lines
+                    if (line.trim().length() == 0)
+                        continue;
+
+                    if (line.startsWith("\t")) {
+
+                        String split[] = line.trim().split("\\s");
+
+                        if (split.length != 2)
+                            continue;
+
+                        int v_weight = Integer.parseInt(split[0]);
+                        int m_weight = Integer.parseInt(split[1]);
+
+                        cur_vanilla_weights.add(v_weight);
+                        cur_vanilla_total += v_weight;
+                        cur_mod_weights.add(m_weight);
+                        cur_mod_total += m_weight;
+
+                    } else {
+
+                        if (cur_class_id.length() > 0 && cur_method_id.length() > 0) {
+                            HookMapping hook = new HookMapping();
+                            hook.trace_index = cur_trace_index;
+                            hook.class_id = cur_class_id;
+                            hook.method_id = cur_method_id;
+                            hook.vanilla_weights = cur_vanilla_weights.stream().mapToInt(i -> i).toArray();
+                            hook.vanilla_weights_total = cur_vanilla_total;
+                            hook.mod_weights = cur_mod_weights.stream().mapToInt(i -> i).toArray();
+                            hook.mod_weights_total = cur_mod_total;
+
+                            min_weight_total = Math.min(cur_vanilla_total, min_weight_total);
+                            max_weight_total = Math.max(cur_vanilla_total, max_weight_total);
+    
+                            hooks.add(hook);
+                        }
+
+                        cur_vanilla_weights.clear();
+                        cur_vanilla_total = 0;
+                        cur_mod_weights.clear();
+                        cur_mod_total = 0;
+
+                        String split[] = line.trim().split("\\s");
+
+                        if (split.length != 3)
+                            continue;
+
+                        cur_trace_index = Integer.parseInt(split[0]);
+                        cur_class_id = split[1];
+                        cur_method_id = split[2];
+                    }
+
+                }
+
+                scan.close();
+
+
+                if (cur_class_id.length() > 0 && cur_method_id.length() > 0) {
+                    HookMapping hook = new HookMapping();
+                    hook.trace_index = cur_trace_index;
+                    hook.class_id = cur_class_id;
+                    hook.method_id = cur_method_id;
+                    hook.vanilla_weights = cur_vanilla_weights.stream().mapToInt(i -> i).toArray();
+                    hook.vanilla_weights_total = cur_vanilla_total;
+                    hook.mod_weights = cur_mod_weights.stream().mapToInt(i -> i).toArray();
+                    hook.mod_weights_total = cur_mod_total;
+
+                    min_weight_total = Math.min(cur_vanilla_total, min_weight_total);
+                    max_weight_total = Math.max(cur_vanilla_total, max_weight_total);
+
+                    hooks.add(hook);
+                }
+
+
+
+                for (HookMapping h : hooks) {
+
+                    List<HookMapping> lis = hook_map.get(h.vanilla_weights_total);
+
+                    if (lis == null) {
+                        lis = new ArrayList<HookMapping>();
+                    }
+
+                    lis.add(h);
+
+                    hook_map.put(h.vanilla_weights_total, lis);
+                }
+
+                for (Map.Entry<Integer, List<HookMapping>> entry : hook_map.entrySet()) {
+                    System.out.println("key: " + entry.getKey());
+                    System.out.println("value: " + entry.getValue());
+                }
+
+
+
                 // official -> intermediary -> named
                 // abc -> net/minecraft/class_4585 -> net/minecraft/util/math/Matrix3f
 
-                String home_dir = System.getProperty("user.home");
+
+                // todo find a better way to get these mappings
 
                 // intermediary to named map
                 var srg_snap = new File(home_dir + "/.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config/1.16.4-20201102.104115/srg_to_snapshot_20201028-1.16.3.tsrg");
@@ -129,7 +286,7 @@ public class Random implements java.io.Serializable {
 
                 Map<String, String> func_map = new HashMap<>();
 
-                var scan = new Scanner(srg_snap);
+                scan = new Scanner(srg_snap);
 
                 while (scan.hasNextLine()) {
                     String line[] = scan.nextLine().split("\\s");
@@ -164,6 +321,7 @@ public class Random implements java.io.Serializable {
                         current_class_id = line[0].replace("/", ".");
                         current_class_name = line[1].replace("/", ".");
                         class_map.put(current_class_id, current_class_name);
+                        // class_map_inv.put(current_class_name, current_class_id);
                     }
 
                     // class method map
@@ -179,7 +337,8 @@ public class Random implements java.io.Serializable {
                   
                         // add to current set
                         // get named if it exists or fall back on intermediary name
-                        current_func_set.add(func_map.getOrDefault(line[3], line[3]));
+                        String named_func = func_map.getOrDefault(line[3], line[3]);
+                        current_func_set.add(named_func);
                     }
                 }
 
@@ -193,7 +352,6 @@ public class Random implements java.io.Serializable {
 
                 is_loaded = true;
 
-                scan.close();
                 
             } catch (Exception e) {
                 System.out.println("failed to load mappings files");
@@ -204,9 +362,6 @@ public class Random implements java.io.Serializable {
         public String deobfuscate(StackTraceElement trace) {
 
             // todo find a way to get the bytecode method signature to narrow down results
-
-
-            // todo return a new StackTraceElement
 
             String class_name = trace.getClassName();
 
@@ -221,10 +376,6 @@ public class Random implements java.io.Serializable {
 
             if (set == null) 
                 return output + "{?}";
-
-            if (set.size() == 1) {
-                return output + set.iterator().next();
-            }
 
             output += "{";
 
@@ -257,6 +408,8 @@ public class Random implements java.io.Serializable {
 
 
     private static MCMappings mappings;
+    private static long world_seed;
+    private StackTraceElement construction_stack[];
 
 
     /**
@@ -308,7 +461,21 @@ public class Random implements java.io.Serializable {
             mappings = new MCMappings();
         }
 
-        // todo use stack trace deobfuscation to flag this instance
+        construction_stack = Thread.currentThread().getStackTrace();
+
+        // [5] com.mojang.serialization.DataResult$Instance.ap3
+        if (construction_stack[5].getClassName().equals("com.mojang.serialization.DataResult$Instance") 
+            && construction_stack[5].getMethodName().equals("ap3")) {
+
+            System.out.println("the world seed is: " + seed);
+            world_seed = seed;
+
+            // for (int i = 2; i < stackTraceElements.length; i++) {
+            //     // print deobfuscated stack trace
+            //     System.out.println("["+i+"] "+mappings.deobfuscate(stackTraceElements[i]));
+            // }
+        }
+
     }
 
     private static long initialScramble(long seed) {
@@ -556,28 +723,83 @@ public class Random implements java.io.Serializable {
         if (bound <= 0)
             throw new IllegalArgumentException(BadBound);
 
-        // if bound == total weight of piglin bartering loot pool
-        if (bound == 459) {
+        // if (bound >= mappings.min_weight_total && bound <= mappings.max_weight_total) {
+
+        // try to find a hook mapping with matching total weight
+        List<MCMappings.HookMapping> hook_mappings = mappings.hook_map.get(bound);
+
+        // we found one
+        if (hook_mappings != null) {
 
             // get the stack trace that called nextInt()
-            // the third element is the caller
+            // the first element is the getStackTrace() call
+            // the third element is the caller of nextInt()
             StackTraceElement stackTraceElements[] = Thread.currentThread().getStackTrace();
 
-            // ignore if shuffle is the caller
-            if (!stackTraceElements[2].getMethodName().equals("shuffle")) {
+            // for each hook mapping that's total weight matches the bound
+            for (MCMappings.HookMapping hook : hook_mappings) {
 
-                System.out.println("are ya winning, son?");
-                System.out.println("the seed is: " + this.seed);
+                // skip if trace_index is out of bounds
+                if (hook.trace_index >= stackTraceElements.length)
+                    continue;
 
-                for (StackTraceElement stackTraceElement : stackTraceElements) {
+                // skip if trace isn't a match with the hook
+                StackTraceElement e = stackTraceElements[hook.trace_index];
+                if (!e.getClassName().equals(hook.class_id) || !e.getMethodName().equals(hook.method_id)) 
+                    continue;
+                
+
+                // ok we found a matching hook
+
+
+                // debug stuff
+                System.out.println("call stack:");
+                for (int i = 0; i < stackTraceElements.length; i++) {
                     // print deobfuscated stack trace
-                    System.out.println(mappings.deobfuscate(stackTraceElement));
+                    System.out.println("[" + i + "] " + mappings.deobfuscate(stackTraceElements[i]));
                 }
 
-                // first one on the loot table
-                return 0;
+
+                // now we roll for the modified weighted table
+
+                int bound2 = hook.mod_weights_total;
+
+                int r = next(31);
+                int m = bound2 - 1;
+                if ((bound2 & m) == 0)  // i.e., bound is a power of 2
+                    r = (int)((bound2 * (long)r) >> 31);
+                else {
+                    for (int u = r;
+                            u - (r = u % bound2) + m < 0;
+                            u = next(31))
+                        ;
+                }
+
+                // find the index of the item relative to the vanilla loot table
+
+                int item_index = 0;
+                int item_vanilla_weight_sum = 0;
+                int len = Math.min(hook.vanilla_weights.length, hook.mod_weights.length);
+
+                while (item_index < len) {
+                    r -= hook.mod_weights[item_index];
+                    // found it
+                    if (r < 0)
+                        break;
+                    item_vanilla_weight_sum += hook.vanilla_weights[item_index];
+
+                    item_index++;
+                }
+
+                assert(item_vanilla_weight_sum < bound);
+
+                // return the vanilla weighted sum so the 
+                return item_vanilla_weight_sum;
             }
         }
+
+
+        // normal nextInt() code
 
         int r = next(31);
         int m = bound - 1;
@@ -585,11 +807,13 @@ public class Random implements java.io.Serializable {
             r = (int)((bound * (long)r) >> 31);
         else {
             for (int u = r;
-                 u - (r = u % bound) + m < 0;
-                 u = next(31))
+                    u - (r = u % bound) + m < 0;
+                    u = next(31))
                 ;
         }
+       
         return r;
+
     }
 
     /**
