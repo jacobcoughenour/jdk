@@ -109,8 +109,6 @@ public class Random implements java.io.Serializable {
         // named_method -> class_id.method_id
         // Map<String, String> class_func_map_inv = new HashMap<>();
 
-        boolean is_loaded = false;
-
         List<HookMapping> hooks = new ArrayList<HookMapping>();
         Map<Integer, List<HookMapping>> hook_map = new HashMap<>();
         int min_weight_total = Integer.MAX_VALUE;
@@ -146,9 +144,15 @@ public class Random implements java.io.Serializable {
 
         public MCMappings() {
 
+            String home_dir = System.getProperty("user.home");
+
+            String version = System.getProperty("java.version");
+
+            System.out.println(version);
+
             try {
 
-                String home_dir = System.getProperty("user.home");
+                System.out.println("loading hooks.txt file...");
 
                 var hook_file = new File(home_dir + "/hooks.txt");
 
@@ -265,6 +269,12 @@ public class Random implements java.io.Serializable {
                 }
 
 
+            } catch (Exception e) {
+                System.out.println("failed to load hooks.txt file");
+            }
+
+
+            try {
 
                 // official -> intermediary -> named
                 // abc -> net/minecraft/class_4585 -> net/minecraft/util/math/Matrix3f
@@ -286,7 +296,7 @@ public class Random implements java.io.Serializable {
 
                 Map<String, String> func_map = new HashMap<>();
 
-                scan = new Scanner(srg_snap);
+                var scan = new Scanner(srg_snap);
 
                 while (scan.hasNextLine()) {
                     String line[] = scan.nextLine().split("\\s");
@@ -349,12 +359,8 @@ public class Random implements java.io.Serializable {
 
                 scan.close();
                 
-
-                is_loaded = true;
-
-                
             } catch (Exception e) {
-                System.out.println("failed to load mappings files");
+                System.out.println("failed to load mcp mappings files");
             }
 
         }
